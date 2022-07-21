@@ -87,6 +87,41 @@ def read_mask_static(mpath, size, n):
         masks.append(mm)
     return masks
 
+
+def get_frame_count(args):
+    vname = args.video
+    if args.use_mp4:
+        vidcap = cv2.VideoCapture(vname)
+        length = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
+    else:
+        lst = os.listdir(vname)
+        length = len(lst)
+    return length
+
+
+def read_frame_from_videos_by_index_list(args, index_lst):
+    vname = args.video
+    frames = []
+    if args.use_mp4:
+        vidcap = cv2.VideoCapture(vname)
+        for i in index_lst:
+            vidcap.set(cv2.CAP_PROP_POS_FRAMES, i)
+            success, image = vidcap.read()
+            if not success:
+                exit(1)
+            image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            frames.append(image)
+    else:
+        lst = os.listdir(vname)
+        lst.sort()
+        fr_lst = [vname + '/' + name for name in lst]
+        for i in index_lst:
+            image = cv2.imread(fr_lst[i])
+            image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            frames.append(image)
+    return frames
+
+
 #  read frames from video
 def read_frame_from_videos(args):
     vname = args.video
@@ -143,21 +178,23 @@ def main_worker():
     print(
         f'Loading videos and masks from: {args.video} | INPUT MP4 format: {args.use_mp4}'
     )
-    frames = read_frame_from_videos(args)
-    frames, size = resize_frames(frames, size)
-    h, w = size[1], size[0]
-    video_length = len(frames)
-    imgs = to_tensors()(frames).unsqueeze(0) * 2 - 1
-    frames = [np.array(f).astype(np.uint8) for f in frames]
+    video_length = get_frame_count(args)
 
-    if args.mask.endswith('.png'):
-        masks = read_mask_static(args.mask, size, video_length)
-    else:
-        masks = read_mask(args.mask, size)
-    binary_masks = [
-        np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in masks
-    ]
-    masks = to_tensors()(masks).unsqueeze(0)
+    # frames = read_frame_from_videos(args)
+    # frames, size = resize_frames(frames, size)
+    h, w = size[1], size[0]
+    # imgs = to_tensors()(frames).unsqueeze(0) * 2 - 1
+
+    # frames = [np.array(f).astype(np.uint8) for f in frames]
+
+    # if args.mask.endswith('.png'):
+    #     masks = read_mask_static(args.mask, size, video_length)
+    # else:
+    #     masks = read_mask(args.mask, size)
+    # binary_masks = [
+    #     np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in masks
+    # ]
+    # masks = to_tensors()(masks).unsqueeze(0)
     #imgs, masks = imgs.to(device), masks.to(device)
     comp_frames = [None] * video_length
 
@@ -169,8 +206,25 @@ def main_worker():
                              min(video_length, f + neighbor_stride + 1))
         ]
         ref_ids = get_ref_index(f, neighbor_ids, video_length)
-        selected_imgs = imgs[:1, neighbor_ids + ref_ids, :, :, :].to(device)
-        selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :].to(device)
+
+        # read temp imgs and masks
+        index_lst = neighbor_ids+ref_ids
+        selected_frames = read_frame_from_videos_by_index_list(args, index_lst)
+        selected_frames, size = resize_frames(selected_frames, size)
+
+        selected_imgs = to_tensors()(selected_frames).unsqueeze(0) * 2 - 1
+
+        selected_frames = [np.array(f).astype(np.uint8) for f in selected_frames]
+        selected_imgs = selected_imgs.to(device)
+
+        selected_masks_data = read_mask_static(args.mask, size, len(index_lst))
+        binary_masks = [
+            np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in selected_masks_data
+        ]
+        selected_masks = to_tensors()(selected_masks_data).unsqueeze(0).to(device)
+
+        #selected_imgs = imgs[:1, neighbor_ids + ref_ids, :, :, :].to(device)
+        #selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :].to(device)
         with torch.no_grad():
             masked_imgs = selected_imgs * (1 - selected_masks)
             mod_size_h = 60
@@ -190,8 +244,8 @@ def main_worker():
             for i in range(len(neighbor_ids)):
                 idx = neighbor_ids[i]
                 img = np.array(pred_imgs[i]).astype(
-                    np.uint8) * binary_masks[idx] + frames[idx] * (
-                        1 - binary_masks[idx])
+                    np.uint8) * binary_masks[i] + selected_frames[i] * (
+                        1 - binary_masks[i])
                 if comp_frames[idx] is None:
                     comp_frames[idx] = img
                 else:
@@ -217,27 +271,27 @@ def main_worker():
     print(f'Finish test! The result video is saved in: {save_path}.')
 
     # show results
-    print('Let us enjoy the result!')
-    fig = plt.figure('Let us enjoy the result')
-    ax1 = fig.add_subplot(1, 2, 1)
-    ax1.axis('off')
-    ax1.set_title('Original Video')
-    ax2 = fig.add_subplot(1, 2, 2)
-    ax2.axis('off')
-    ax2.set_title('Our Result')
-    imdata1 = ax1.imshow(frames[0])
-    imdata2 = ax2.imshow(comp_frames[0].astype(np.uint8))
-
-    def update(idx):
-        imdata1.set_data(frames[idx])
-        imdata2.set_data(comp_frames[idx].astype(np.uint8))
-
-    fig.tight_layout()
-    anim = animation.FuncAnimation(fig,
-                                   update,
-                                   frames=len(frames),
-                                   interval=50)
-    plt.show()
+    # print('Let us enjoy the result!')
+    # fig = plt.figure('Let us enjoy the result')
+    # ax1 = fig.add_subplot(1, 2, 1)
+    # ax1.axis('off')
+    # ax1.set_title('Original Video')
+    # ax2 = fig.add_subplot(1, 2, 2)
+    # ax2.axis('off')
+    # ax2.set_title('Our Result')
+    # imdata1 = ax1.imshow(frames[0])
+    # imdata2 = ax2.imshow(comp_frames[0].astype(np.uint8))
+    #
+    # def update(idx):
+    #     imdata1.set_data(frames[idx])
+    #     imdata2.set_data(comp_frames[idx].astype(np.uint8))
+    #
+    # fig.tight_layout()
+    # anim = animation.FuncAnimation(fig,
+    #                                update,
+    #                                frames=len(frames),
+    #                                interval=50)
+    # plt.show()
 
 
 if __name__ == '__main__':
