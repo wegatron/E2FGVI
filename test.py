@@ -1,3 +1,6 @@
+#--model e2fgvi_hq --video examples/tennis --mask examples/tennis_mask --ckpt release_model/E2FGVI-HQ-CVPR22.pth
+#--model e2fgvi --video /home/wegatron/win-data/data/video_inpating/input/delogo_examples/test_01.mp4 --mask /home/wegatron/win-data/data/video_inpating/input/delogo_examples/mask/test_01_mask.png --ckpt release_model/E2FGVI-CVPR22.pth
+#--model e2fgvi_hq --video /home/wegatron/win-data/data/video_inpating/input/delogo_examples/test_01.mp4 --mask /home/wegatron/win-data/data/video_inpating/input/delogo_examples/mask/test_01_mask.png --ckpt release_model/E2FGVI-HQ-CVPR22.pth
 # -*- coding: utf-8 -*-
 import cv2
 from PIL import Image
@@ -18,7 +21,7 @@ parser.add_argument("-c", "--ckpt", type=str, required=True)
 parser.add_argument("-m", "--mask", type=str, required=True)
 parser.add_argument("--model", type=str, choices=['e2fgvi', 'e2fgvi_hq'])
 parser.add_argument("--step", type=int, default=10)
-parser.add_argument("--num_ref", type=int, default=-1)
+parser.add_argument("--num_ref", type=int, default=7)
 parser.add_argument("--neighbor_stride", type=int, default=5)
 parser.add_argument("--savefps", type=int, default=24)
 
@@ -69,6 +72,20 @@ def read_mask(mpath, size):
         masks.append(Image.fromarray(m * 255))
     return masks
 
+
+def read_mask_static(mpath, size, n):
+    masks = []
+    m = Image.open(mpath)
+    m = m.resize(size, Image.NEAREST)
+    m = np.array(m.convert('L'))
+    m = np.array(m > 0).astype(np.uint8)
+    m = cv2.dilate(m,
+                   cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)),
+                   iterations=4)
+    mm = Image.fromarray(m * 255)
+    for i in range(0, n):
+        masks.append(mm)
+    return masks
 
 #  read frames from video
 def read_frame_from_videos(args):
@@ -133,12 +150,15 @@ def main_worker():
     imgs = to_tensors()(frames).unsqueeze(0) * 2 - 1
     frames = [np.array(f).astype(np.uint8) for f in frames]
 
-    masks = read_mask(args.mask, size)
+    if args.mask.endswith('.png'):
+        masks = read_mask_static(args.mask, size, video_length)
+    else:
+        masks = read_mask(args.mask, size)
     binary_masks = [
         np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in masks
     ]
     masks = to_tensors()(masks).unsqueeze(0)
-    imgs, masks = imgs.to(device), masks.to(device)
+    #imgs, masks = imgs.to(device), masks.to(device)
     comp_frames = [None] * video_length
 
     # completing holes by e2fgvi
@@ -149,8 +169,8 @@ def main_worker():
                              min(video_length, f + neighbor_stride + 1))
         ]
         ref_ids = get_ref_index(f, neighbor_ids, video_length)
-        selected_imgs = imgs[:1, neighbor_ids + ref_ids, :, :, :]
-        selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :]
+        selected_imgs = imgs[:1, neighbor_ids + ref_ids, :, :, :].to(device)
+        selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :].to(device)
         with torch.no_grad():
             masked_imgs = selected_imgs * (1 - selected_masks)
             mod_size_h = 60
