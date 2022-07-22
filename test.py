@@ -47,7 +47,7 @@ def get_ref_index(f, neighbor_ids, length):
                 ref_index.append(i)
     else:
         start_idx = max(0, f - ref_length * (num_ref // 2))
-        end_idx = min(length, f + ref_length * (num_ref // 2))
+        end_idx = min(length - 1, f + ref_length * (num_ref // 2))
         for i in range(start_idx, end_idx + 1, ref_length):
             if i not in neighbor_ids:
                 if len(ref_index) > num_ref:
@@ -226,7 +226,6 @@ def main_worker():
                              min(video_length, f + neighbor_stride + 1))
         ]
         ref_ids = get_ref_index(f, neighbor_ids, video_length)
-
         # read temp imgs and masks
         index_lst = neighbor_ids+ref_ids
         selected_frames = read_frame_from_videos_by_index_list(args, index_lst)
