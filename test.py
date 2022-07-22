@@ -73,6 +73,25 @@ def read_mask(mpath, size):
     return masks
 
 
+# read frame-wise masks
+def read_mask_lst(mpath, size, lst):
+    masks = []
+    mnames = os.listdir(mpath)
+    mnames.sort()
+    for i in lst:
+        #for mp in mnames:
+        mp = mnames[i]
+        m = Image.open(os.path.join(mpath, mp))
+        m = m.resize(size, Image.NEAREST)
+        m = np.array(m.convert('L'))
+        m = np.array(m > 0).astype(np.uint8)
+        m = cv2.dilate(m,
+                       cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)),
+                       iterations=4)
+        masks.append(Image.fromarray(m * 255))
+    return masks
+
+
 def read_mask_static(mpath, size, n):
     masks = []
     m = Image.open(mpath)
@@ -179,6 +198,7 @@ def main_worker():
         f'Loading videos and masks from: {args.video} | INPUT MP4 format: {args.use_mp4}'
     )
     video_length = get_frame_count(args)
+    print('video_length={}'.format(video_length))
 
     # frames = read_frame_from_videos(args)
     # frames, size = resize_frames(frames, size)
@@ -217,7 +237,10 @@ def main_worker():
         selected_frames = [np.array(f).astype(np.uint8) for f in selected_frames]
         selected_imgs = selected_imgs.to(device)
 
-        selected_masks_data = read_mask_static(args.mask, size, len(index_lst))
+        if args.mask.endswith('.png'):
+            selected_masks_data = read_mask_static(args.mask, size, len(index_lst))
+        else:
+            selected_masks_data = read_mask_lst(args.mask, size, index_lst)
         binary_masks = [
             np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in selected_masks_data
         ]
