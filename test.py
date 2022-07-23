@@ -7,7 +7,6 @@ from PIL import Image
 import numpy as np
 import importlib
 import os
-import argparse
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from matplotlib import animation
@@ -15,6 +14,7 @@ import torch
 
 from core.utils import to_tensors
 
+import argparse
 parser = argparse.ArgumentParser(description="E2FGVI")
 parser.add_argument("-v", "--video", type=str, required=True)
 parser.add_argument("-c", "--ckpt", type=str, required=True)
@@ -24,7 +24,6 @@ parser.add_argument("--step", type=int, default=10)
 parser.add_argument("--num_ref", type=int, default=7)
 parser.add_argument("--neighbor_stride", type=int, default=5)
 parser.add_argument("--savefps", type=int, default=24)
-
 # args for e2fgvi_hq (which can handle videos with arbitrary resolution)
 parser.add_argument("--set_size", action='store_true', default=False)
 parser.add_argument("--width", type=int)
@@ -32,10 +31,20 @@ parser.add_argument("--height", type=int)
 
 args = parser.parse_args()
 
+# params from parser
 ref_length = args.step  # ref_step
 num_ref = args.num_ref
 neighbor_stride = args.neighbor_stride
 default_fps = args.savefps
+video_path = args.video
+mask_path = args.mask
+use_mp4 = True if video_path.endswith('.mp4') else False
+ckpt = args.ckpt
+model_name = args.model
+if model_name == 'e2fgvi_hq':
+    size = (args.width, args.height)
+else:
+    size = (432, 240)
 
 
 # sample reference frames from the whole video
@@ -107,21 +116,20 @@ def read_mask_static(mpath, size, n):
     return masks
 
 
-def get_frame_count(args):
-    vname = args.video
-    if args.use_mp4:
-        vidcap = cv2.VideoCapture(vname)
+def get_frame_count():
+    if use_mp4:
+        vidcap = cv2.VideoCapture(video_path)
         length = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
     else:
-        lst = os.listdir(vname)
+        lst = os.listdir(video_path)
         length = len(lst)
     return length
 
 
-def read_frame_from_videos_by_index_list(args, index_lst):
-    vname = args.video
+def read_frame_from_videos_by_index_list(index_lst):
+    vname = video_path
     frames = []
-    if args.use_mp4:
+    if use_mp4:
         vidcap = cv2.VideoCapture(vname)
         for i in index_lst:
             vidcap.set(cv2.CAP_PROP_POS_FRAMES, i)
@@ -142,10 +150,10 @@ def read_frame_from_videos_by_index_list(args, index_lst):
 
 
 #  read frames from video
-def read_frame_from_videos(args):
-    vname = args.video
+def read_frame_from_videos():
+    vname = video_path
     frames = []
-    if args.use_mp4:
+    if use_mp4:
         vidcap = cv2.VideoCapture(vname)
         success, image = vidcap.read()
         count = 0
@@ -178,44 +186,21 @@ def main_worker():
     # set up models
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    if args.model == "e2fgvi":
-        size = (432, 240)
-    elif args.set_size:
-        size = (args.width, args.height)
-    else:
-        size = None
-
-    net = importlib.import_module('model.' + args.model)
+    net = importlib.import_module('model.' + model_name)
     model = net.InpaintGenerator().to(device)
-    data = torch.load(args.ckpt, map_location=device)
+    data = torch.load(ckpt, map_location=device)
     model.load_state_dict(data)
-    print(f'Loading model from: {args.ckpt}')
+    print(f'Loading model from: {ckpt}')
     model.eval()
 
     # prepare datset
-    args.use_mp4 = True if args.video.endswith('.mp4') else False
     print(
-        f'Loading videos and masks from: {args.video} | INPUT MP4 format: {args.use_mp4}'
+        f'Loading videos and masks from: {video_path} | INPUT MP4 format: {use_mp4}'
     )
-    video_length = get_frame_count(args)
+    video_length = get_frame_count()
     print('video_length={}'.format(video_length))
 
-    # frames = read_frame_from_videos(args)
-    # frames, size = resize_frames(frames, size)
     h, w = size[1], size[0]
-    # imgs = to_tensors()(frames).unsqueeze(0) * 2 - 1
-
-    # frames = [np.array(f).astype(np.uint8) for f in frames]
-
-    # if args.mask.endswith('.png'):
-    #     masks = read_mask_static(args.mask, size, video_length)
-    # else:
-    #     masks = read_mask(args.mask, size)
-    # binary_masks = [
-    #     np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in masks
-    # ]
-    # masks = to_tensors()(masks).unsqueeze(0)
-    #imgs, masks = imgs.to(device), masks.to(device)
     comp_frames = [None] * video_length
 
     # completing holes by e2fgvi
@@ -226,9 +211,10 @@ def main_worker():
                              min(video_length, f + neighbor_stride + 1))
         ]
         ref_ids = get_ref_index(f, neighbor_ids, video_length)
+
         # read temp imgs and masks
         index_lst = neighbor_ids+ref_ids
-        selected_frames = read_frame_from_videos_by_index_list(args, index_lst)
+        selected_frames = read_frame_from_videos_by_index_list(index_lst)
         selected_frames, size = resize_frames(selected_frames, size)
 
         selected_imgs = to_tensors()(selected_frames).unsqueeze(0) * 2 - 1
@@ -236,10 +222,10 @@ def main_worker():
         selected_frames = [np.array(f).astype(np.uint8) for f in selected_frames]
         selected_imgs = selected_imgs.to(device)
 
-        if args.mask.endswith('.png'):
-            selected_masks_data = read_mask_static(args.mask, size, len(index_lst))
+        if mask_path.endswith('.png'):
+            selected_masks_data = read_mask_static(mask_path, size, len(index_lst))
         else:
-            selected_masks_data = read_mask_lst(args.mask, size, index_lst)
+            selected_masks_data = read_mask_lst(mask_path, size, index_lst)
         binary_masks = [
             np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in selected_masks_data
         ]
@@ -278,9 +264,9 @@ def main_worker():
     print('Saving videos...')
     save_dir_name = 'results'
     ext_name = '_results.mp4'
-    save_base_name = args.video.split('/')[-1]
+    save_base_name = video_path.split('/')[-1]
     save_name = save_base_name.replace(
-        '.mp4', ext_name) if args.use_mp4 else save_base_name + ext_name
+        '.mp4', ext_name) if use_mp4 else save_base_name + ext_name
     if not os.path.exists(save_dir_name):
         os.makedirs(save_dir_name)
     save_path = os.path.join(save_dir_name, save_name)
