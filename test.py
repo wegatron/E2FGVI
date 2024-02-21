@@ -14,8 +14,29 @@ import torch
 
 from core.utils import to_tensors
 from text_det import MaskDetect
-
 import argparse
+
+import time
+
+class Timer:
+    def __init__(self):
+        self.timers = {}
+
+    def start(self, label):
+        if label not in self.timers:
+            self.timers[label] = 0
+        self.timers[label] -= time.time()
+
+    def stop(self, label):
+        if label not in self.timers:
+            raise ValueError(f"Timer '{label}' not started.")
+        self.timers[label] += time.time()
+        return self.timers[label]
+    
+    def print(self):
+        return print(self.timers)
+
+
 parser = argparse.ArgumentParser(description="E2FGVI")
 parser.add_argument("-v", "--video", type=str, required=True)
 parser.add_argument("-c", "--ckpt", type=str, required=True)
@@ -242,7 +263,9 @@ def main_worker():
     mask_det = MaskDetect()
     # completing holes by e2fgvi
     print(f'Start test...')
+    timer = Timer()
     for f in tqdm(range(0, video_length, neighbor_stride)):
+        timer.start('preprocess')
         neighbor_ids = [
             i for i in range(max(0, f - neighbor_stride),
                              min(video_length, f + neighbor_stride + 1))
@@ -258,7 +281,11 @@ def main_worker():
 
         #selected_frames, size = resize_frames(selected_frames, size)        
         selected_frames = [np.array(f).astype(np.uint8) for f in selected_frames]
+
+        timer.start('gen_mask')
         binary_masks = mask_det.mask(selected_frames)
+        timer.stop('gen_mask')
+
         selected_masks = torch.from_numpy(binary_masks.astype(np.float32)).unsqueeze(0).permute(0, 1, 4, 2, 3).to(device)        
         #selected_masks = to_tensors()(selected_masks_data).unsqueeze(0).to(device)
 
@@ -267,6 +294,8 @@ def main_worker():
         # print(len(index_lst))
         # print(selected_imgs.shape)
         # print(selected_masks.shape)
+        timer.stop('preprocess')
+        timer.start('inpainting')
         with torch.no_grad():
             masked_imgs = selected_imgs * (1 - selected_masks)
             mod_size_h = 60
@@ -293,8 +322,9 @@ def main_worker():
                 else:
                     comp_frames[idx] = comp_frames[idx].astype(
                         np.float32) * 0.5 + img.astype(np.float32) * 0.5
-
+        timer.stop('inpainting')
     # saving videos
+    timer.start('save_video')
     print('Saving videos...')
     save_dir_name = 'results'
     ext_name = '_results.mp4'
@@ -315,7 +345,7 @@ def main_worker():
         writer.write(frames[f])
     writer.release()
     print(f'Finish test! The result video is saved in: {save_path}.')
-
+    timer.stop('save_video')
     # show results
     # print('Let us enjoy the result!')
     # fig = plt.figure('Let us enjoy the result')
