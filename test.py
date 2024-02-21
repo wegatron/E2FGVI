@@ -28,6 +28,7 @@ parser.add_argument("--savefps", type=int, default=24)
 parser.add_argument("--set_size", action='store_true', default=False)
 parser.add_argument("--width", type=int)
 parser.add_argument("--height", type=int)
+parser.add_argument("--max_frame", type=int, default=200)
 
 args = parser.parse_args()
 
@@ -46,6 +47,7 @@ if model_name == 'e2fgvi_hq':
 else:
     size = (432, 240)
 
+bbox = np.loadtxt(args.mask[:-1]+'_bbox.txt').astype(np.int32)
 
 # sample reference frames from the whole video
 def get_ref_index(f, neighbor_ids, length):
@@ -72,7 +74,7 @@ def read_mask(mpath, size):
     mnames.sort()
     for mp in mnames:
         m = Image.open(os.path.join(mpath, mp))
-        m = m.resize(size, Image.NEAREST)
+        #m = m.resize(size, Image.NEAREST)
         m = np.array(m.convert('L'))
         m = np.array(m > 0).astype(np.uint8)
         m = cv2.dilate(m,
@@ -83,15 +85,15 @@ def read_mask(mpath, size):
 
 
 # read frame-wise masks
-def read_mask_lst(mpath, size, lst):
+def read_mask_lst(mpath, lst):
     masks = []
     mnames = os.listdir(mpath)
     mnames.sort()
-    for i in lst:
+    for i in lst:        
         #for mp in mnames:
         mp = mnames[i]
         m = Image.open(os.path.join(mpath, mp))
-        m = m.resize(size, Image.NEAREST)
+        #m = m.resize(size, Image.NEAREST)
         m = np.array(m.convert('L'))
         m = np.array(m > 0).astype(np.uint8)
         m = cv2.dilate(m,
@@ -101,10 +103,10 @@ def read_mask_lst(mpath, size, lst):
     return masks
 
 
-def read_mask_static(mpath, size, n):
+def read_mask_static(mpath, n):
     masks = []
     m = Image.open(mpath)
-    m = m.resize(size, Image.NEAREST)
+    #m = m.resize(size, Image.NEAREST)
     m = np.array(m.convert('L'))
     m = np.array(m > 0).astype(np.uint8)
     m = cv2.dilate(m,
@@ -122,8 +124,8 @@ def get_frame_count():
         length = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
     else:
         lst = os.listdir(video_path)
-        length = len(lst)
-    return length
+        length = len(lst)        
+    return min(length, args.max_frame)
 
 
 def read_frame_from_videos_by_index_list(index_lst):
@@ -172,6 +174,22 @@ def read_frame_from_videos():
             frames.append(image)
     return frames
 
+def read_video(frame_cnt):
+    vidcap = cv2.VideoCapture(video_path)
+    width = int(vidcap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(vidcap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    size = (width, height)
+    success, image = vidcap.read()
+    count = 0
+    frames = []
+    while success:
+        if count == frame_cnt:
+            break        
+        frames.append(image)
+        success, image = vidcap.read()
+        count += 1
+    vidcap.release()
+    return frames, size
 
 # resize frames
 def resize_frames(frames, size=None):
@@ -181,6 +199,25 @@ def resize_frames(frames, size=None):
         size = frames[0].size
     return frames, size
 
+def crop_frames(frames, bbox):
+    cropped_frames = []
+    for frame in frames:
+        # Extracting bbox coordinates
+        x1, y1, x2, y2 = bbox
+        
+        # Crop the frame using the bounding box
+        cropped_frame = frame.crop((x1, y1, x2, y2))
+        
+        # Append the cropped frame to the list of cropped frames
+        cropped_frames.append(cropped_frame)
+    
+    return cropped_frames 
+
+
+def merge_frame(frame, inpainted, bbox):
+    x1, y1, x2, y2 = bbox
+    frame[y1:y2, x1:x2] = inpainted
+    
 
 def main_worker():
     # set up models
@@ -200,7 +237,8 @@ def main_worker():
     video_length = get_frame_count()
     print('video_length={}'.format(video_length))
 
-    h, w = size[1], size[0]
+    #h, w = size[1], size[0]
+    h, w = bbox[3]-bbox[1], bbox[2]-bbox[0]
     comp_frames = [None] * video_length
 
     # completing holes by e2fgvi
@@ -215,7 +253,8 @@ def main_worker():
         # read temp imgs and masks
         index_lst = neighbor_ids+ref_ids
         selected_frames = read_frame_from_videos_by_index_list(index_lst)
-        selected_frames, size = resize_frames(selected_frames, size)
+        selected_frames = crop_frames(selected_frames, bbox)
+        #selected_frames, size = resize_frames(selected_frames, size)        
 
         selected_imgs = to_tensors()(selected_frames).unsqueeze(0) * 2 - 1
 
@@ -223,9 +262,10 @@ def main_worker():
         selected_imgs = selected_imgs.to(device)
 
         if mask_path.endswith('.png'):
-            selected_masks_data = read_mask_static(mask_path, size, len(index_lst))
+            selected_masks_data = read_mask_static(mask_path, len(index_lst))
         else:
-            selected_masks_data = read_mask_lst(mask_path, size, index_lst)
+            selected_masks_data = read_mask_lst(mask_path, index_lst)
+        selected_masks_data = crop_frames(selected_masks_data, bbox)
         binary_masks = [
             np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in selected_masks_data
         ]
@@ -233,6 +273,9 @@ def main_worker():
 
         #selected_imgs = imgs[:1, neighbor_ids + ref_ids, :, :, :].to(device)
         #selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :].to(device)
+        # print(len(index_lst))
+        # print(selected_imgs.shape)
+        # print(selected_masks.shape)
         with torch.no_grad():
             masked_imgs = selected_imgs * (1 - selected_masks)
             mod_size_h = 60
@@ -270,11 +313,15 @@ def main_worker():
     if not os.path.exists(save_dir_name):
         os.makedirs(save_dir_name)
     save_path = os.path.join(save_dir_name, save_name)
+
+    # read ori video frames
+    frames, size = read_video(video_length)
     writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*"mp4v"),
                              default_fps, size)
     for f in range(video_length):
-        comp = comp_frames[f].astype(np.uint8)
-        writer.write(cv2.cvtColor(comp, cv2.COLOR_BGR2RGB))
+        comp = cv2.cvtColor(comp_frames[f].astype(np.uint8), cv2.COLOR_BGR2RGB)
+        merge_frame(frames[f], comp, bbox)
+        writer.write(frames[f])
     writer.release()
     print(f'Finish test! The result video is saved in: {save_path}.')
 
