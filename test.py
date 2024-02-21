@@ -19,12 +19,12 @@ import argparse
 parser = argparse.ArgumentParser(description="E2FGVI")
 parser.add_argument("-v", "--video", type=str, required=True)
 parser.add_argument("-c", "--ckpt", type=str, required=True)
-parser.add_argument("-m", "--mask", type=str, required=True)
+#parser.add_argument("-m", "--mask", type=str, required=True)
 parser.add_argument("--model", type=str, choices=['e2fgvi', 'e2fgvi_hq'])
 parser.add_argument("--step", type=int, default=10)
 parser.add_argument("--num_ref", type=int, default=7)
 parser.add_argument("--neighbor_stride", type=int, default=5)
-parser.add_argument("--savefps", type=int, default=24)
+parser.add_argument("--savefps", type=int, default=30)
 # args for e2fgvi_hq (which can handle videos with arbitrary resolution)
 parser.add_argument("--set_size", action='store_true', default=False)
 parser.add_argument("--width", type=int)
@@ -39,7 +39,6 @@ num_ref = args.num_ref
 neighbor_stride = args.neighbor_stride
 default_fps = args.savefps
 video_path = args.video
-mask_path = args.mask
 use_mp4 = True if video_path.endswith('.mp4') else False
 ckpt = args.ckpt
 model_name = args.model
@@ -47,8 +46,6 @@ if model_name == 'e2fgvi_hq':
     size = (args.width, args.height)
 else:
     size = (432, 240)
-
-bbox = np.loadtxt(args.mask[:-1]+'_bbox.txt').astype(np.int32)
 
 # sample reference frames from the whole video
 def get_ref_index(f, neighbor_ids, length):
@@ -119,14 +116,12 @@ def read_mask_static(mpath, n):
     return masks
 
 
-def get_frame_count():
-    if use_mp4:
-        vidcap = cv2.VideoCapture(video_path)
-        length = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
-    else:
-        lst = os.listdir(video_path)
-        length = len(lst)        
-    return min(length, args.max_frame)
+def get_video_info():
+    vidcap = cv2.VideoCapture(video_path)
+    length = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(vidcap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(vidcap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    return min(length, args.max_frame), width, height
 
 
 def read_frame_from_videos_by_index_list(index_lst):
@@ -235,7 +230,9 @@ def main_worker():
     print(
         f'Loading videos and masks from: {video_path} | INPUT MP4 format: {use_mp4}'
     )
-    video_length = get_frame_count()
+
+    video_length, v_width, v_height = get_video_info()
+    bbox = np.array([0, v_height*2/3, v_width, v_height], dtype='uint32')
     print('video_length={}'.format(video_length))
 
     #h, w = size[1], size[0]

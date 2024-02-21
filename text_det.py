@@ -11,8 +11,8 @@ def seg(image):
     return mask
 
 class MaskDetect:
-    def __init__(self):        
-        self.ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)  # need to run only once to download and load model into memory
+    def __init__(self):
+        self.ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False, use_gpu=True)  # need to run only once to download and load model into memory
         self.kernel = np.ones((13, 13), np.uint8)
 
     def mask(self, images):
@@ -23,6 +23,8 @@ class MaskDetect:
             text_area_mask = np.zeros_like(image)
             for idx in range(len(result)):
                 res = result[idx]
+                if res == None or len(res) == 0:
+                    continue
                 boxes = np.array([line[0] for line in res]).astype(np.int32)
                 boxes[:, 0, :] = boxes[:, 0, :] - 8
                 
