@@ -13,6 +13,7 @@ from matplotlib import animation
 import torch
 
 from core.utils import to_tensors
+from text_det import MaskDetect
 
 import argparse
 parser = argparse.ArgumentParser(description="E2FGVI")
@@ -241,6 +242,7 @@ def main_worker():
     h, w = bbox[3]-bbox[1], bbox[2]-bbox[0]
     comp_frames = [None] * video_length
 
+    mask_det = MaskDetect()
     # completing holes by e2fgvi
     print(f'Start test...')
     for f in tqdm(range(0, video_length, neighbor_stride)):
@@ -254,22 +256,14 @@ def main_worker():
         index_lst = neighbor_ids+ref_ids
         selected_frames = read_frame_from_videos_by_index_list(index_lst)
         selected_frames = crop_frames(selected_frames, bbox)
-        #selected_frames, size = resize_frames(selected_frames, size)        
-
         selected_imgs = to_tensors()(selected_frames).unsqueeze(0) * 2 - 1
-
-        selected_frames = [np.array(f).astype(np.uint8) for f in selected_frames]
         selected_imgs = selected_imgs.to(device)
 
-        if mask_path.endswith('.png'):
-            selected_masks_data = read_mask_static(mask_path, len(index_lst))
-        else:
-            selected_masks_data = read_mask_lst(mask_path, index_lst)
-        selected_masks_data = crop_frames(selected_masks_data, bbox)
-        binary_masks = [
-            np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in selected_masks_data
-        ]
-        selected_masks = to_tensors()(selected_masks_data).unsqueeze(0).to(device)
+        #selected_frames, size = resize_frames(selected_frames, size)        
+        selected_frames = [np.array(f).astype(np.uint8) for f in selected_frames]
+        binary_masks = mask_det.mask(selected_frames)
+        selected_masks = torch.from_numpy(binary_masks.astype(np.float32)).unsqueeze(0).permute(0, 1, 4, 2, 3).to(device)        
+        #selected_masks = to_tensors()(selected_masks_data).unsqueeze(0).to(device)
 
         #selected_imgs = imgs[:1, neighbor_ids + ref_ids, :, :, :].to(device)
         #selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :].to(device)
