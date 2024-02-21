@@ -11,9 +11,9 @@ def seg(image):
     return mask
 
 class MaskDetect:
-    def __init__(self):
-        self.ocr = PaddleOCR(use_angle_cls=True, lang="en")  # need to run only once to download and load model into memory
-        self.kernel = np.ones((8, 8), np.uint8)         
+    def __init__(self):        
+        self.ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)  # need to run only once to download and load model into memory
+        self.kernel = np.ones((13, 13), np.uint8)
 
     def mask(self, images):
         final_masks = np.empty((len(images), images[0].shape[0], images[0].shape[1], images[0].shape[2]), dtype=bool)
@@ -24,9 +24,22 @@ class MaskDetect:
             for idx in range(len(result)):
                 res = result[idx]
                 boxes = np.array([line[0] for line in res]).astype(np.int32)
-                text_area_mask = cv2.fillPoly(text_area_mask, boxes, color=(255,255,255))
-            text_area_mask = cv2.dilate(text_area_mask, self.kernel)
+                boxes[:, 0, :] = boxes[:, 0, :] - 8
+                
+                boxes[:, 1, 0] = boxes[:, 1, 0] + 8
+                boxes[:, 1, 1] = boxes[:, 1, 1] - 8
+                
+                boxes[:, 2, :] = boxes[:, 2, :] + 8
+
+                boxes[:, 3, 0] = boxes[:, 3, 0] - 8
+                boxes[:, 3, 1] = boxes[:, 3, 1] + 8
+                for l in range(boxes.shape[0]): # opencv have a bug!!!! fill multiple polygons
+                    text_area_mask = cv2.fillPoly(text_area_mask, [boxes[l]], color=(255,255,255))
+            #text_area_mask = cv2.dilate(text_area_mask, self.kernel)
             mask = seg(image)
+            mask = cv2.dilate(mask, self.kernel)
             final_masks[index, ...] = (text_area_mask == 255) & (mask == 255)
+            # cv2.imwrite('masked.png', ((mask==255).astype('float') * images[0]).astype('uint8'))
+            # cv2.imwrite('masked.png', (final_masks[0, ...].astype('float') * images[0]).astype('uint8'))
             index = index + 1
         return final_masks
