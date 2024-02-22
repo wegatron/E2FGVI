@@ -1,11 +1,18 @@
 .PHONY: run_text_mask, run_inpaint
 
-max_frame = 400
+
+
+#export PATH=/home/wegatron/opt/anaconda3/envs/envs/zsw/lib/python3.10/site-packages/torch/lib:$PATH
+#export LD_LIBRARY_PATH=/home/wegatron/opt/anaconda3/envs/envs/zsw/lib/python3.10/site-packages/torch/lib:$LD_LIBRARY_PATH
+
+max_frame = 10000
 
 #video_name = 文字倾斜
 #video_name = 亮背景\ 白色字\ 无描边
-video_name = 亮背景\ 白色字\ 黑描边
+#video_name = 亮背景\ 白色字\ 黑描边
 #video_name = 描边
+#video_name = 20240218-160032
+video_name = 20240222-094450
 
 # input_video = /home/wegatron/win-data/data/subtile_poj/亮背景\ 白色字\ 无描边.mp4
 # mask_dir = /home/wegatron/win-data/data/subtile_poj/results/亮背景\ 白色字\ 无描边/mask/
@@ -21,6 +28,6 @@ run_text_mask:
 
 run_inpaint:
 	mkdir -p $(inpaint_result_dir)
-	python test.py --model e2fgvi_hq --video $(input_video) --mask $(mask_dir)  --ckpt release_model/E2FGVI-HQ-CVPR22.pth --max_frame $(max_frame)
+	python test.py --model e2fgvi_hq --video $(input_video) --ckpt release_model/E2FGVI-HQ-CVPR22.pth --max_frame $(max_frame)
 
 all: run_text_mask run_inpaint

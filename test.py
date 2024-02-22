@@ -140,7 +140,7 @@ def get_video_info():
     length = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
     width = int(vidcap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(vidcap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = int(vidcap.get(cv2.CAP_PROP_FPS))
+    fps = vidcap.get(cv2.CAP_PROP_FPS)
     vidcap.release()
     return fps, min(length, args.max_frame), width, height
 
