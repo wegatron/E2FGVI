@@ -11,13 +11,15 @@ def seg(image):
     return mask
 
 class MaskDetect:
-    def __init__(self):
+    def __init__(self, inpaint_board = False):
         self.ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False, use_gpu=True)  # need to run only once to download and load model into memory
-        self.kernel = np.ones((30, 30), np.uint8)
-        self.text_area_expand = 180
-
-        #self.kernel = np.ones((13, 13), np.uint8)
-        #self.text_area_expand = 8
+        if inpaint_board:
+            self.kernel = np.ones((30, 30), np.uint8)
+            self.text_area_expand = 180
+        else:
+            print('!!!!!!!!!!!!!!!!!!!!ZZZZ')
+            self.kernel = np.ones((13, 13), np.uint8)
+            self.text_area_expand = 8            
 
     def mask(self, images):
         final_masks = np.empty((len(images), images[0].shape[0], images[0].shape[1], images[0].shape[2]), dtype=bool)

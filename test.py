@@ -40,15 +40,11 @@ class Timer:
 parser = argparse.ArgumentParser(description="E2FGVI")
 parser.add_argument("-v", "--video", type=str, required=True)
 parser.add_argument("-c", "--ckpt", type=str, required=True)
-#parser.add_argument("-m", "--mask", type=str, required=True)
 parser.add_argument("--model", type=str, choices=['e2fgvi', 'e2fgvi_hq'])
 parser.add_argument("--step", type=int, default=10)
 parser.add_argument("--num_ref", type=int, default=7)
 parser.add_argument("--neighbor_stride", type=int, default=5)
-# args for e2fgvi_hq (which can handle videos with arbitrary resolution)
-parser.add_argument("--set_size", action='store_true', default=False)
-parser.add_argument("--width", type=int)
-parser.add_argument("--height", type=int)
+parser.add_argument("--inpaint_board", type=int, default = 0)
 parser.add_argument("--max_frame", type=int, default=200)
 
 args = parser.parse_args()
@@ -61,10 +57,6 @@ video_path = args.video
 use_mp4 = True if video_path.endswith('.mp4') else False
 ckpt = args.ckpt
 model_name = args.model
-if model_name == 'e2fgvi_hq':
-    size = (args.width, args.height)
-else:
-    size = (432, 240)
 
 # sample reference frames from the whole video
 def get_ref_index(f, neighbor_ids, length):
@@ -247,9 +239,8 @@ def main_worker():
     h, w = bbox[3]-bbox[1], bbox[2]-bbox[0]
     comp_frames = [None] * video_length
 
-    v_frames, v_size = read_video(video_length)
-
-    mask_det = MaskDetect()
+    v_frames, v_size = read_video(video_length)    
+    mask_det = MaskDetect(args.inpaint_board != 0)
     # completing holes by e2fgvi
     print(f'Start test...')
     timer = Timer()
@@ -279,11 +270,6 @@ def main_worker():
         selected_masks = torch.from_numpy(binary_masks.astype(np.float32)).unsqueeze(0).permute(0, 1, 4, 2, 3).to(device)        
         #selected_masks = to_tensors()(selected_masks_data).unsqueeze(0).to(device)
 
-        #selected_imgs = imgs[:1, neighbor_ids + ref_ids, :, :, :].to(device)
-        #selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :].to(device)
-        # print(len(index_lst))
-        # print(selected_imgs.shape)
-        # print(selected_masks.shape)
         timer.stop('preprocess')
         timer.start('inpainting')
         with torch.no_grad():
