@@ -239,12 +239,15 @@ def main_worker():
 
     fps, video_length, v_width, v_height = get_video_info()
     print(f'input video {v_width} {v_height}')
-    bbox = np.array([0, v_height*2/3, v_width, v_height*4/5], dtype='uint32')
+    bbox = np.array([0, v_height*0.6, v_width, v_height*4/5], dtype='uint32')
+    #bbox = np.array([0, v_height*2/3, v_width, v_height*4/5], dtype='uint32')
     print('video_length={}'.format(video_length))
 
     #h, w = size[1], size[0]
     h, w = bbox[3]-bbox[1], bbox[2]-bbox[0]
     comp_frames = [None] * video_length
+
+    v_frames, v_size = read_video(video_length)
 
     mask_det = MaskDetect()
     # completing holes by e2fgvi
@@ -260,7 +263,8 @@ def main_worker():
 
         # read temp imgs and masks
         index_lst = neighbor_ids+ref_ids
-        selected_frames = read_frame_from_videos_by_index_list(index_lst)
+        #selected_frames = read_frame_from_videos_by_index_list(index_lst)
+        selected_frames = [Image.fromarray(cv2.cvtColor(v_frames[i], cv2.COLOR_BGR2RGB)) for i in index_lst]
         selected_frames = crop_frames(selected_frames, bbox)
         selected_imgs = to_tensors()(selected_frames).unsqueeze(0) * 2 - 1
         selected_imgs = selected_imgs.to(device)
@@ -322,12 +326,12 @@ def main_worker():
     save_path = os.path.join(save_dir_name, save_name)
 
     # read ori video frames
-    frames, size = read_video(video_length)
-    writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
+    #frames, size = read_video(video_length)
+    writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, v_size)
     for f in range(video_length):
         comp = cv2.cvtColor(comp_frames[f].astype(np.uint8), cv2.COLOR_BGR2RGB)
-        merge_frame(frames[f], comp, bbox)
-        writer.write(frames[f])
+        merge_frame(v_frames[f], comp, bbox)
+        writer.write(v_frames[f])
     writer.release()
     print(f'Finish test! The result video is saved in: {save_path}.')
     timer.stop('save_video')

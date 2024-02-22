@@ -18,6 +18,7 @@ if __name__ == '__main__':
             break
         final_masks = mask_det.mask([frame])
         cv2.imwrite(f'{sys.argv[2]}mask{index}.png', final_masks[0].astype('uint8')*255)
+        cv2.imwrite(f'{sys.argv[2]}a_masked{index}.png', frame.astype('uint8') * final_masks[0])
         index = index + 1
         if index == int(sys.argv[3]):
             break
