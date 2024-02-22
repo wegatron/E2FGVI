@@ -45,7 +45,6 @@ parser.add_argument("--model", type=str, choices=['e2fgvi', 'e2fgvi_hq'])
 parser.add_argument("--step", type=int, default=10)
 parser.add_argument("--num_ref", type=int, default=7)
 parser.add_argument("--neighbor_stride", type=int, default=5)
-parser.add_argument("--savefps", type=int, default=30)
 # args for e2fgvi_hq (which can handle videos with arbitrary resolution)
 parser.add_argument("--set_size", action='store_true', default=False)
 parser.add_argument("--width", type=int)
@@ -58,7 +57,6 @@ args = parser.parse_args()
 ref_length = args.step  # ref_step
 num_ref = args.num_ref
 neighbor_stride = args.neighbor_stride
-default_fps = args.savefps
 video_path = args.video
 use_mp4 = True if video_path.endswith('.mp4') else False
 ckpt = args.ckpt
@@ -142,54 +140,41 @@ def get_video_info():
     length = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
     width = int(vidcap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(vidcap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    return min(length, args.max_frame), width, height
+    fps = int(vidcap.get(cv2.CAP_PROP_FPS))
+    vidcap.release()
+    return fps, min(length, args.max_frame), width, height
 
 
 def read_frame_from_videos_by_index_list(index_lst):
     vname = video_path
     frames = []
-    if use_mp4:
-        vidcap = cv2.VideoCapture(vname)
-        for i in index_lst:
-            vidcap.set(cv2.CAP_PROP_POS_FRAMES, i)
-            success, image = vidcap.read()
-            if not success:
-                exit(1)
-            image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            frames.append(image)
-    else:
-        lst = os.listdir(vname)
-        lst.sort()
-        fr_lst = [vname + '/' + name for name in lst]
-        for i in index_lst:
-            image = cv2.imread(fr_lst[i])
-            image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            frames.append(image)
-    return frames
-
-
-#  read frames from video
-def read_frame_from_videos():
-    vname = video_path
-    frames = []
-    if use_mp4:
-        vidcap = cv2.VideoCapture(vname)
+    vidcap = cv2.VideoCapture(vname)
+    for i in index_lst:
+        vidcap.set(cv2.CAP_PROP_POS_FRAMES, i)
         success, image = vidcap.read()
-        count = 0
-        while success:
-            image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            frames.append(image)
-            success, image = vidcap.read()
-            count += 1
-    else:
-        lst = os.listdir(vname)
-        lst.sort()
-        fr_lst = [vname + '/' + name for name in lst]
-        for fr in fr_lst:
-            image = cv2.imread(fr)
-            image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            frames.append(image)
+        if not success:
+            print(f'read frame {i} error!')
+            exit(1)
+        image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        frames.append(image)
+    vidcap.release()
     return frames
+
+
+# #  read frames from video
+# def read_frame_from_videos():
+#     vname = video_path
+#     frames = []
+#     vidcap = cv2.VideoCapture(vname)
+#     success, image = vidcap.read()
+#     count = 0
+#     while success:
+#         image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+#         frames.append(image)
+#         success, image = vidcap.read()
+#         count += 1
+#     vidcap.release()
+#     return frames
 
 def read_video(frame_cnt):
     vidcap = cv2.VideoCapture(video_path)
@@ -252,8 +237,9 @@ def main_worker():
         f'Loading videos and masks from: {video_path} | INPUT MP4 format: {use_mp4}'
     )
 
-    video_length, v_width, v_height = get_video_info()
-    bbox = np.array([0, v_height*2/3, v_width, v_height], dtype='uint32')
+    fps, video_length, v_width, v_height = get_video_info()
+    print(f'input video {v_width} {v_height}')
+    bbox = np.array([0, v_height*2/3, v_width, v_height*4/5], dtype='uint32')
     print('video_length={}'.format(video_length))
 
     #h, w = size[1], size[0]
@@ -337,8 +323,7 @@ def main_worker():
 
     # read ori video frames
     frames, size = read_video(video_length)
-    writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*"mp4v"),
-                             default_fps, size)
+    writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
     for f in range(video_length):
         comp = cv2.cvtColor(comp_frames[f].astype(np.uint8), cv2.COLOR_BGR2RGB)
         merge_frame(frames[f], comp, bbox)
@@ -346,28 +331,7 @@ def main_worker():
     writer.release()
     print(f'Finish test! The result video is saved in: {save_path}.')
     timer.stop('save_video')
-    # show results
-    # print('Let us enjoy the result!')
-    # fig = plt.figure('Let us enjoy the result')
-    # ax1 = fig.add_subplot(1, 2, 1)
-    # ax1.axis('off')
-    # ax1.set_title('Original Video')
-    # ax2 = fig.add_subplot(1, 2, 2)
-    # ax2.axis('off')
-    # ax2.set_title('Our Result')
-    # imdata1 = ax1.imshow(frames[0])
-    # imdata2 = ax2.imshow(comp_frames[0].astype(np.uint8))
-    #
-    # def update(idx):
-    #     imdata1.set_data(frames[idx])
-    #     imdata2.set_data(comp_frames[idx].astype(np.uint8))
-    #
-    # fig.tight_layout()
-    # anim = animation.FuncAnimation(fig,
-    #                                update,
-    #                                frames=len(frames),
-    #                                interval=50)
-    # plt.show()
+    timer.print()
 
 
 if __name__ == '__main__':
